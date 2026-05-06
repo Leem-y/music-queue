@@ -115,7 +115,11 @@ export function YouTubeIFramePlayer(props: {
             onEndedRef.current()
           },
           onError: (evt: any) => {
-            const msg = `YouTube error code: ${evt?.data}`
+            const code = Number(evt?.data)
+            const msg =
+              code === 150 || code === 101
+                ? `This video can't be played on the host (YouTube embed blocked: ${code}). Try another upload.`
+                : `YouTube error code: ${evt?.data}`
             setLastError(msg)
             onErrorRef.current(msg)
           },

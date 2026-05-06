@@ -30,6 +30,15 @@ const recState: {
   items: [],
 }
 
+function resolveLobbyYoutubeId(): string | null {
+  const raw = process.env.NEXT_PUBLIC_LOBBY_YOUTUBE_ID
+  if (raw === "") return null
+  const v = String(raw ?? "jfKfPfyJRdk").trim()
+  return /^[a-zA-Z0-9_-]{11}$/.test(v) ? v : "jfKfPfyJRdk"
+}
+
+const lobbyYoutubeId = resolveLobbyYoutubeId()
+
 function emitRecommendations(io: IOServer) {
   io.emit("recommendations:updated", {
     items: recState.items,
@@ -44,7 +53,8 @@ async function updateRecommendationsAndAutoplay(io: IOServer) {
     prisma.nowPlaying.findUnique({ where: { id: 1 } }),
   ])
 
-  const isIdle = queueCount === 0 && !nowPlaying?.youtubeId
+  const isLobbyNowPlaying = !!(lobbyYoutubeId && nowPlaying?.youtubeId === lobbyYoutubeId)
+  const isIdle = queueCount === 0 && (!nowPlaying?.youtubeId || isLobbyNowPlaying)
   if (!isIdle) {
     if (recState.items.length) {
       recState.items = []
@@ -122,6 +132,7 @@ function toNowPlayingDTO(row: {
     durationSec: row.meta?.durationSec ?? null,
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     isPaused: row.isPaused,
+    isLobby: !!(lobbyYoutubeId && row.youtubeId && row.youtubeId === lobbyYoutubeId),
   }
 }
 
@@ -206,7 +217,7 @@ async function advanceQueueAndBroadcast(io: IOServer) {
   if (!next) {
     await prisma.nowPlaying.update({
       where: { id: 1 },
-      data: { youtubeId: null, queueItemId: null, startedAt: null, isPaused: false },
+      data: { youtubeId: lobbyYoutubeId ?? null, queueItemId: null, startedAt: lobbyYoutubeId ? new Date() : null, isPaused: false },
     })
     io.emit("nowPlaying:updated", { nowPlaying: await fetchNowPlayingDTO() })
     await updateRecommendationsAndAutoplay(io)
@@ -398,7 +409,8 @@ export function registerSocketHandlers(io: IOServer) {
         // If nothing is currently playing, start playback immediately.
         await ensureNowPlayingRow()
         const np = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
-        if (!np?.youtubeId) {
+        const isLobby = !!(lobbyYoutubeId && np?.youtubeId === lobbyYoutubeId)
+        if (!np?.youtubeId || isLobby) {
           await advanceQueueAndBroadcast(io)
         } else {
           await updateRecommendationsAndAutoplay(io)
@@ -474,12 +486,23 @@ export function registerSocketHandlers(io: IOServer) {
         await advanceQueueAndBroadcast(io)
       })
 
-      socket.on("playback:error", async ({ message }) => {
+      socket.on("playback:error", async ({ youtubeId, message }) => {
         // Only advance on real YouTube player error codes (101/150/etc).
         // Client-side integration errors shouldn't clear the queue.
         // eslint-disable-next-line no-console
         console.warn("Playback error:", message)
         const msg = String(message ?? "")
+        const yt = String(youtubeId ?? "").trim()
+        const isEmbedBlocked =
+          msg.includes("YouTube error code: 150") ||
+          msg.includes("YouTube error code: 101") ||
+          msg.includes("embed blocked")
+        if (isEmbedBlocked) {
+          io.emit("toast", {
+            type: "error",
+            message: `Skipped a track that can't be embedded on the host TV.${yt ? ` (${yt})` : ""}`,
+          })
+        }
         if (msg.startsWith("YouTube error")) {
           await advanceQueueAndBroadcast(io)
         }

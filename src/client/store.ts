@@ -39,6 +39,7 @@ export const useAppStore = create<AppState>((set) => ({
     durationSec: null,
     startedAt: null,
     isPaused: false,
+    isLobby: false,
   },
   recommendations: { items: [], autoplayAt: null },
   pairingCode: "------",

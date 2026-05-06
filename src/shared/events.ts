@@ -20,6 +20,7 @@ export type NowPlayingDTO = {
   durationSec: number | null
   startedAt: string | null
   isPaused: boolean
+  isLobby: boolean
 }
 
 export type RecommendationDTO = {

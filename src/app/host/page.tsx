@@ -40,15 +40,6 @@ function formatDuration(sec: number | null) {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`
 }
 
-const DEFAULT_LOBBY_YOUTUBE_ID = "jfKfPfyJRdk"
-
-function resolveLobbyYoutubeId(): string | null {
-  const raw = process.env.NEXT_PUBLIC_LOBBY_YOUTUBE_ID
-  if (raw === "") return null
-  const v = (raw ?? DEFAULT_LOBBY_YOUTUBE_ID).trim()
-  return /^[a-zA-Z0-9_-]{11}$/.test(v) ? v : DEFAULT_LOBBY_YOUTUBE_ID
-}
-
 export default function HostPage() {
   useSocketSync()
   useSecondTick()
@@ -62,7 +53,6 @@ export default function HostPage() {
   const recommendations = useAppStore((s) => s.recommendations)
 
   const socket = useMemo(() => getSocket(), [])
-  const lobbyYoutubeId = useMemo(() => resolveLobbyYoutubeId(), [])
   const [pairDraft, setPairDraft] = useState("")
 
   const sensors = useSensors(
@@ -75,11 +65,10 @@ export default function HostPage() {
   const progress = nowPlaying.durationSec ? 0 : 0
 
   const nextUp = queue[0] ?? null
-  const isIdle = !nowPlaying.youtubeId && queue.length === 0
-  const isLobby = isIdle && !!lobbyYoutubeId
-  const playbackYoutubeId = nowPlaying.youtubeId ?? (isLobby ? lobbyYoutubeId : null)
-  const lobbyThumbnailUrl = lobbyYoutubeId ? `https://i.ytimg.com/vi/${lobbyYoutubeId}/hqdefault.jpg` : null
-  const heroThumbnailUrl = nowPlaying.thumbnailUrl ?? (isLobby ? lobbyThumbnailUrl : null)
+  const isLobby = nowPlaying.isLobby
+  const isIdle = !nowPlaying.youtubeId || isLobby
+  const playbackYoutubeId = nowPlaying.youtubeId
+  const heroThumbnailUrl = nowPlaying.thumbnailUrl
 
   const displayTitle = isLobby
     ? "Lobby"
