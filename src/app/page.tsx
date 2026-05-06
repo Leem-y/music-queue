@@ -44,6 +44,7 @@ export default function GuestPage() {
   const queue = useAppStore((s) => s.queue)
   const role = useAppStore((s) => s.role)
   const name = useAppStore((s) => s.name)
+  const isHostDisplay = useAppStore((s) => s.isHostDisplay)
 
   const [nameDraft, setNameDraft] = useState(name ?? "")
   const [pairDraft, setPairDraft] = useState("")
@@ -154,12 +155,14 @@ export default function GuestPage() {
                 </DialogContent>
               </Dialog>
             </div>
-            <Link href="/host" className="inline-flex">
-              <Button className="h-10 gap-2 rounded-full bg-white text-black hover:bg-white/90">
-                <Tv className="h-4 w-4" />
-                Host TV
-              </Button>
-            </Link>
+            {isHostDisplay ? (
+              <Link href="/host" className="inline-flex">
+                <Button className="h-10 gap-2 rounded-full bg-white text-black hover:bg-white/90">
+                  <Tv className="h-4 w-4" />
+                  Host TV
+                </Button>
+              </Link>
+            ) : null}
           </div>
         </header>
 

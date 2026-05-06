@@ -10,6 +10,7 @@ import type { ClientToServerEvents, ServerToClientEvents } from "@/shared/events
 const dev = process.env.NODE_ENV !== "production"
 const port = Number(process.env.PORT ?? 3000)
 const hostname = process.env.HOST ?? "0.0.0.0"
+const hostTvIp = String(process.env.HOST_TV_IP ?? "").trim()
 
 const app = next({ dev, hostname, port })
 const handler = app.getRequestHandler()
@@ -17,7 +18,23 @@ const handler = app.getRequestHandler()
 async function main() {
   await app.prepare()
 
-  const httpServer = createServer((req, res) => handler(req, res))
+  const httpServer = createServer((req, res) => {
+    try {
+      const url = req.url ?? "/"
+      if (hostTvIp && url.startsWith("/host")) {
+        const ipRaw = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "")
+        if (ipRaw !== hostTvIp && ipRaw !== "127.0.0.1" && ipRaw !== "::1") {
+          res.statusCode = 302
+          res.setHeader("Location", "/")
+          res.end()
+          return
+        }
+      }
+    } catch {
+      // ignore
+    }
+    handler(req, res)
+  })
 
   const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {

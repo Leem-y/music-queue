@@ -72,7 +72,16 @@ const HOST_ROOM = "hosts"
 
 function isHostClient(socket: IOSocket): boolean {
   const ct = socket.handshake.auth?.clientType
-  return ct === "host"
+  if (ct !== "host") return false
+  const allowed = String(process.env.HOST_TV_IP ?? "").trim()
+  if (!allowed) return true // if not configured, allow any host clientType
+
+  const ipRaw =
+    (socket.handshake.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
+    socket.handshake.address ??
+    ""
+  const ip = ipRaw.replace(/^::ffff:/, "")
+  return ip === allowed
 }
 
 function toQueueItemDTO(row: {
@@ -136,7 +145,7 @@ async function buildFullState(
     : null
 
   return {
-    me: { sessionId: session.id, name: session.name, role: session.role },
+    me: { sessionId: session.id, name: session.name, role: session.role, isHostDisplay: opts.includePairingCode },
     users: { count: usersState.count },
     queue: queue.map(toQueueItemDTO),
     nowPlaying: toNowPlayingDTO({

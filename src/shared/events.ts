@@ -36,6 +36,7 @@ export type FullStateDTO = {
     sessionId: string
     name: string | null
     role: Role
+    isHostDisplay: boolean
   }
   users: {
     count: number

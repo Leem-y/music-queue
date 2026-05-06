@@ -8,6 +8,7 @@ type AppState = {
   sessionId: string | null
   name: string | null
   role: Role
+  isHostDisplay: boolean
   usersCount: number
   queue: QueueItemDTO[]
   nowPlaying: NowPlayingDTO
@@ -27,6 +28,7 @@ export const useAppStore = create<AppState>((set) => ({
   sessionId: null,
   name: null,
   role: "guest",
+  isHostDisplay: false,
   usersCount: 0,
   queue: [],
   nowPlaying: {
@@ -46,6 +48,7 @@ export const useAppStore = create<AppState>((set) => ({
       sessionId: s.me.sessionId,
       name: s.me.name,
       role: s.me.role,
+      isHostDisplay: s.me.isHostDisplay,
       usersCount: s.users.count,
       queue: s.queue,
       nowPlaying: s.nowPlaying,
