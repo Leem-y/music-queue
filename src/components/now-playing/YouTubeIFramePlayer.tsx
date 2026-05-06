@@ -94,6 +94,14 @@ export function YouTubeIFramePlayer(props: {
 
     if (/^[a-zA-Z0-9_-]{11}$/.test(stripped)) return stripped
 
+    // Be resilient to hidden/extra characters (e.g. zero-width chars, punctuation).
+    const compact = stripped.replace(/[^a-zA-Z0-9_-]/g, "")
+    if (/^[a-zA-Z0-9_-]{11}$/.test(compact)) return compact
+    if (compact.length > 11) {
+      const first11 = compact.slice(0, 11)
+      if (/^[a-zA-Z0-9_-]{11}$/.test(first11)) return first11
+    }
+
     const match =
       stripped.match(/[?&]v=([a-zA-Z0-9_-]{11})/)?.[1] ??
       stripped.match(/\/embed\/([a-zA-Z0-9_-]{11})/)?.[1] ??
