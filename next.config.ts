@@ -20,6 +20,8 @@ const nextConfig: NextConfig = {
       // Common channel/avatar hostnames returned by InnerTube.
       { protocol: "https", hostname: "yt3.ggpht.com" },
       { protocol: "https", hostname: "yt3.googleusercontent.com" },
+      // Jamendo artwork host.
+      { protocol: "https", hostname: "usercontent.jamendo.com" },
     ],
   },
 };

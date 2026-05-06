@@ -61,12 +61,15 @@ export function AudioPlayer(props: {
   const { src, isPaused, playbackMode = "queue", onEnded, onError, onReady } = props
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [mounted, setMounted] = useState(false)
   const [unlocked, setUnlocked] = useState(false)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
 
   const fallbackSrc = useMemo(() => makeFallbackWavUrl(), [])
   const effectiveSrc = src ?? (playbackMode === "lobby" ? fallbackSrc : null)
+
+  useEffect(() => setMounted(true), [])
 
   useEffect(() => {
     const a = audioRef.current
@@ -142,7 +145,8 @@ export function AudioPlayer(props: {
 
   return (
     <div className="relative h-full w-full">
-      <audio ref={audioRef} src={effectiveSrc ?? undefined} preload="auto" />
+      {/* Avoid SSR hydration mismatch from blob: URLs by only setting src after mount. */}
+      <audio ref={audioRef} src={mounted ? (effectiveSrc ?? undefined) : undefined} preload="auto" />
 
       {!unlocked ? (
         <button
