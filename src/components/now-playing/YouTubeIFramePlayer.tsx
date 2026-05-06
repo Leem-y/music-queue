@@ -83,8 +83,23 @@ export function YouTubeIFramePlayer(props: {
   const [lastError, setLastError] = useState<string | null>(null)
 
   function normalizeId(input: string | null) {
-    const id = String(input ?? "").trim()
-    return /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null
+    const raw = String(input ?? "").trim()
+    if (!raw) return null
+
+    // Accept common accidental formats like `"VIDEOID"` or full URLs.
+    const stripped =
+      (raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'"))
+        ? raw.slice(1, -1).trim()
+        : raw
+
+    if (/^[a-zA-Z0-9_-]{11}$/.test(stripped)) return stripped
+
+    const match =
+      stripped.match(/[?&]v=([a-zA-Z0-9_-]{11})/)?.[1] ??
+      stripped.match(/\/embed\/([a-zA-Z0-9_-]{11})/)?.[1] ??
+      stripped.match(/([a-zA-Z0-9_-]{11})/)?.[1] ??
+      null
+    return match && /^[a-zA-Z0-9_-]{11}$/.test(match) ? match : null
   }
 
   useEffect(() => {
