@@ -1,0 +1,15 @@
+services:
+  music-queue:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "file:./dev.db"
+      HOST: "0.0.0.0"
+      PORT: "3000"
+    volumes:
+      - music_queue_data:/app/dev.db
+
+volumes:
+  music_queue_data: {}
+

@@ -1,3 +1,82 @@
+# Music Queue (LAN Party)
+
+Apple Music-inspired, local-network party music queue powered by YouTube.
+
+## Features
+- **Guest UI**: search YouTube, add to queue, see what’s playing.
+- **Host TV UI** (`/host`): fullscreen now-playing, queue, pairing code, admin controls.
+- **Real-time sync** via Socket.IO (no refresh).
+- **Persistence**: SQLite + Prisma.
+- **Recommendations**: most-played + recently popular (shown when the queue is empty).
+- **Lobby music** (host): when the queue is empty, `/host` plays ambient “waiting” audio until someone queues a track.
+
+## Tech
+- Next.js (App Router) + React + TypeScript
+- Tailwind + shadcn/ui
+- Socket.IO (custom Node server)
+- Prisma + SQLite
+- YouTube: server-side search/metadata via `youtubei.js`, host playback via YouTube IFrame API
+
+## Setup
+
+### 1) Install dependencies
+
+```bash
+pnpm install
+```
+
+### 2) Configure env
+
+```bash
+copy .env.example .env
+```
+
+Optional:
+- `NEXT_PUBLIC_LOBBY_YOUTUBE_ID`: 11-character YouTube video id for idle lobby playback on `/host` (set to empty to disable).
+
+### 3) Create DB + seed
+
+```bash
+pnpm prisma migrate dev
+pnpm prisma generate
+pnpm prisma db seed
+```
+
+### 4) Run (LAN)
+
+```bash
+pnpm dev
+```
+
+Open on the host machine:
+- Guest UI: `http://localhost:3000/`
+- Host TV UI: `http://localhost:3000/host`
+
+To allow phones/tablets on the same network to connect:
+- Make sure `.env` uses `HOST="0.0.0.0"`.
+- Find your host machine IP (e.g. `192.168.1.50`).
+- Guests open: `http://<host-ip>:3000/`
+
+## Admin pairing + shortcuts
+- Host screen shows a **6-digit pairing code**.
+- Enter it on the host (or any device) to enable **Admin**.
+- Host keyboard shortcuts (admin only; disabled while **lobby music** is playing):
+  - Space: pause/resume
+  - Right arrow: skip
+  - C: clear queue
+
+## Notes on YouTube playback
+- Browsers restrict autoplay with sound. The host page shows a **“Tap to start playback”** overlay the first time—after that, continuous playback is typically allowed.
+- This project does **not** download/stream raw audio; it plays via the official IFrame player.
+
+## Docker (optional)
+
+```bash
+docker compose up --build
+```
+
+Then open `http://<host-ip>:3000/`.
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
