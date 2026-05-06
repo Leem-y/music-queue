@@ -30,11 +30,16 @@ const recState: {
   items: [],
 }
 
+function normalizeYouTubeId(input: unknown): string | null {
+  const s = String(input ?? "").trim()
+  return /^[a-zA-Z0-9_-]{11}$/.test(s) ? s : null
+}
+
 function resolveLobbyYoutubeId(): string | null {
   const raw = process.env.NEXT_PUBLIC_LOBBY_YOUTUBE_ID
   if (raw === "") return null
-  const v = String(raw ?? "jfKfPfyJRdk").trim()
-  return /^[a-zA-Z0-9_-]{11}$/.test(v) ? v : "jfKfPfyJRdk"
+  const v = normalizeYouTubeId(raw ?? "jfKfPfyJRdk")
+  return v ?? "jfKfPfyJRdk"
 }
 
 const lobbyYoutubeId = resolveLobbyYoutubeId()
@@ -124,15 +129,16 @@ function toNowPlayingDTO(row: {
   isPaused: boolean
   meta?: { title: string; artist: string | null; thumbnailUrl: string | null; durationSec: number | null } | null
 }): NowPlayingDTO {
+  const youtubeId = normalizeYouTubeId(row.youtubeId)
   return {
-    youtubeId: row.youtubeId,
+    youtubeId,
     title: row.meta?.title ?? null,
     artist: row.meta?.artist ?? null,
     thumbnailUrl: row.meta?.thumbnailUrl ?? null,
     durationSec: row.meta?.durationSec ?? null,
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     isPaused: row.isPaused,
-    isLobby: !!(lobbyYoutubeId && row.youtubeId && row.youtubeId === lobbyYoutubeId),
+    isLobby: !!(lobbyYoutubeId && youtubeId && youtubeId === lobbyYoutubeId),
   }
 }
 
@@ -224,13 +230,21 @@ async function advanceQueueAndBroadcast(io: IOServer) {
     return
   }
 
+  const nextId = normalizeYouTubeId(next.youtubeId)
+  if (!nextId) {
+    // Defensive: if a bad id somehow got into the queue, drop it and continue.
+    await prisma.queueItem.delete({ where: { id: next.id } }).catch(() => null)
+    await advanceQueueAndBroadcast(io)
+    return
+  }
+
   // Important: do NOT set queueItemId to a row we are about to delete.
   // The queue item is a transient "request"; once it becomes now-playing, it exits the queue.
   await prisma.$transaction(async (tx) => {
     await tx.nowPlaying.update({
       where: { id: 1 },
       data: {
-        youtubeId: next.youtubeId,
+        youtubeId: nextId,
         queueItemId: null,
         startedAt: new Date(),
         isPaused: false,
