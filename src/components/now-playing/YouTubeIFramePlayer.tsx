@@ -199,8 +199,12 @@ export function YouTubeIFramePlayer(props: {
   }, [youtubeId, playbackMode, state.ready, unlocked])
 
   useEffect(() => {
-    // Also clear stale errors when going idle.
-    if (!youtubeId) setLastError(null)
+    // Clear stale errors as soon as we have a valid id (even before player ready).
+    if (!youtubeId) {
+      setLastError(null)
+      return
+    }
+    if (normalizeId(youtubeId)) setLastError(null)
   }, [youtubeId])
 
   useEffect(() => {
