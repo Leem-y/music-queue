@@ -19,13 +19,32 @@ function loadYouTubeIFrameAPI(): Promise<any> {
   if (typeof window === "undefined") return Promise.reject(new Error("No window"))
   if (window.YT?.Player) return Promise.resolve(window.YT)
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const timeoutMs = 10_000
+    const timeout = setTimeout(() => {
+      rejectOnce(new Error("YouTube IFrame API failed to load (blocked or network issue)."))
+    }, timeoutMs)
+
+    let settled = false
+    const resolveOnce = (v: any) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(v)
+    }
+    const rejectOnce = (e: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      reject(e)
+    }
+
     const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]')
     if (existing) {
       const t = setInterval(() => {
         if (window.YT?.Player) {
           clearInterval(t)
-          resolve(window.YT)
+          resolveOnce(window.YT)
         }
       }, 50)
       return
@@ -33,9 +52,10 @@ function loadYouTubeIFrameAPI(): Promise<any> {
 
     const tag = document.createElement("script")
     tag.src = "https://www.youtube.com/iframe_api"
+    tag.onerror = () => rejectOnce(new Error("Failed to load https://www.youtube.com/iframe_api"))
     document.body.appendChild(tag)
 
-    window.onYouTubeIframeAPIReady = () => resolve(window.YT)
+    window.onYouTubeIframeAPIReady = () => resolveOnce(window.YT)
   })
 }
 
@@ -83,6 +103,8 @@ export function YouTubeIFramePlayer(props: {
       playerRef.current = new YT.Player(containerId, {
         width: "100%",
         height: "100%",
+        // Helps some networks/extensions that interfere with youtube.com embeds.
+        host: "https://www.youtube-nocookie.com",
         videoId: youtubeId ?? undefined,
         playerVars: {
           autoplay: 0,
