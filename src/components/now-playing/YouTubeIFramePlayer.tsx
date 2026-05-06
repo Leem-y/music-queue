@@ -79,6 +79,7 @@ export function YouTubeIFramePlayer(props: {
   const onErrorRef = useRef(onError)
   const onReadyRef = useRef(onReady)
   const [unlocked, setUnlocked] = useState(false)
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [state, setState] = useState<PlayerState>({ ready: false, currentTime: 0, duration: 0 })
   const [lastError, setLastError] = useState<string | null>(null)
 
@@ -128,7 +129,8 @@ export function YouTubeIFramePlayer(props: {
         height: "100%",
         // Helps some networks/extensions that interfere with youtube.com embeds.
         host: "https://www.youtube-nocookie.com",
-        videoId: youtubeId ?? undefined,
+        // Create the player once; load/cue videos via API calls after.
+        videoId: undefined,
         playerVars: {
           autoplay: 0,
           controls: 1,
@@ -158,6 +160,11 @@ export function YouTubeIFramePlayer(props: {
               return
             }
             onEndedRef.current()
+          },
+          // Some browsers will block scripted playback until a user gesture.
+          // YouTube exposes this event so we can show the unlock overlay.
+          onAutoplayBlocked: () => {
+            setAutoplayBlocked(true)
           },
           onError: (evt: any) => {
             const code = Number(evt?.data)
@@ -218,17 +225,20 @@ export function YouTubeIFramePlayer(props: {
 
     // Clear any previous error once we have a valid ID.
     setLastError(null)
+    setAutoplayBlocked(false)
 
     try {
       const startVideo = () => {
-        if (typeof player.loadVideoById === "function") {
-          player.loadVideoById(id)
-        } else if (typeof player.cueVideoById === "function") {
+        // Prefer cue then play (more resilient with autoplay policies).
+        if (typeof player.cueVideoById === "function") {
           player.cueVideoById(id)
-          player.playVideo?.()
+        } else if (typeof player.loadVideoById === "function") {
+          player.loadVideoById(id)
+          return
         } else {
-          throw new Error("YouTube player did not expose load/cue methods")
+          throw new Error("YouTube player did not expose cue/load methods")
         }
+        if (unlocked) player.playVideo?.()
       }
 
       // If the user has already interacted, use loadVideoById to start immediately.
@@ -249,7 +259,7 @@ export function YouTubeIFramePlayer(props: {
           }
         }, 250)
       } else {
-        player.cueVideoById(id)
+        startVideo()
       }
     } catch (e) {
       const msg = (e as Error).message
@@ -310,6 +320,7 @@ export function YouTubeIFramePlayer(props: {
           className="absolute inset-0 grid place-items-center rounded-3xl bg-white/5 ring-1 ring-white/10 backdrop-blur-sm"
           onClick={() => {
             setUnlocked(true)
+            setAutoplayBlocked(false)
             try {
               const id = normalizeId(youtubeId)
               if (id) {
@@ -345,7 +356,7 @@ export function YouTubeIFramePlayer(props: {
           }}
         >
           <div className="rounded-full bg-white px-8 py-4 text-lg font-semibold text-black">
-            Tap to start playback
+            {autoplayBlocked ? "Tap to allow autoplay" : "Tap to start playback"}
           </div>
         </button>
       ) : null}
