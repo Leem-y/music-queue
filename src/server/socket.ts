@@ -128,6 +128,8 @@ function isHostClient(socket: IOSocket): boolean {
     socket.handshake.address ??
     ""
   const ip = ipRaw.replace(/^::ffff:/, "")
+  // Allow the host machine itself even if the browser connects via loopback.
+  if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true
   return ip === allowed
 }
 
