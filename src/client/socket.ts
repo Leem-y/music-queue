@@ -13,12 +13,13 @@ export function getSocket() {
   if (socket) return socket
 
   const sessionId = getOrCreateSessionId()
+  const clientType = window.location.pathname.startsWith("/host") ? "host" : "guest"
   socket = io({
     path: "/socket.io",
     // Don't force websocket-only; many LAN setups (phones/guest wifi)
     // can block websockets. Let Socket.IO fall back to polling.
     transports: ["websocket", "polling"],
-    auth: { sessionId },
+    auth: { sessionId, clientType },
   })
 
   socket.on("connect_error", (err) => console.warn("socket connect_error", err))

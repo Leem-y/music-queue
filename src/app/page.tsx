@@ -44,8 +44,6 @@ export default function GuestPage() {
   const queue = useAppStore((s) => s.queue)
   const role = useAppStore((s) => s.role)
   const name = useAppStore((s) => s.name)
-  const pairingCode = useAppStore((s) => s.pairingCode)
-  const pairingCodeTtlMs = useAppStore((s) => s.pairingCodeTtlMs)
 
   const [nameDraft, setNameDraft] = useState(name ?? "")
   const [pairDraft, setPairDraft] = useState("")
@@ -123,13 +121,6 @@ export default function GuestPage() {
               </Button>
             </div>
             <div className="flex items-center gap-2">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
-                <div className="text-[11px] text-white/60 leading-none">Pairing code</div>
-                <div className="mt-1 font-mono text-sm tracking-widest">{pairingCode}</div>
-                <div className="mt-1 text-[11px] text-white/45 leading-none">
-                  rotates in {Math.max(0, Math.ceil(pairingCodeTtlMs / 1000))}s
-                </div>
-              </div>
               <Dialog>
                 <DialogTrigger
                   render={

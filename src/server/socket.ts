@@ -68,6 +68,13 @@ async function ensureNowPlayingRow() {
   })
 }
 
+const HOST_ROOM = "hosts"
+
+function isHostClient(socket: IOSocket): boolean {
+  const ct = socket.handshake.auth?.clientType
+  return ct === "host"
+}
+
 function toQueueItemDTO(row: {
   id: string
   youtubeId: string
@@ -109,7 +116,10 @@ function toNowPlayingDTO(row: {
   }
 }
 
-async function buildFullState(session: { id: string; name: string | null; role: "guest" | "admin" }): Promise<FullStateDTO> {
+async function buildFullState(
+  session: { id: string; name: string | null; role: "guest" | "admin" },
+  opts: { includePairingCode: boolean },
+): Promise<FullStateDTO> {
   await ensureNowPlayingRow()
 
   const [queue, nowPlaying] = await Promise.all([
@@ -120,7 +130,7 @@ async function buildFullState(session: { id: string; name: string | null; role: 
     prisma.nowPlaying.findUnique({ where: { id: 1 } }),
   ])
 
-  const pairing = getOrRotatePairingCode(pairingCodeTtlMs)
+  const pairing = opts.includePairingCode ? getOrRotatePairingCode(pairingCodeTtlMs) : null
   const meta = nowPlaying?.youtubeId
     ? await prisma.songMetadata.findUnique({ where: { youtubeId: nowPlaying.youtubeId } })
     : null
@@ -146,7 +156,8 @@ async function buildFullState(session: { id: string; name: string | null; role: 
       items: recState.items,
       autoplayAt: null,
     },
-    admin: { pairingCode: pairing.code, pairingCodeTtlMs: pairing.ttlMs },
+    // Never send the pairing code to guest clients.
+    admin: { pairingCode: pairing?.code ?? "", pairingCodeTtlMs: pairing?.ttlMs ?? 0 },
   }
 }
 
@@ -255,7 +266,8 @@ export function registerSocketHandlers(io: IOServer) {
   // (Also ensures clients get the new code when it rotates.)
   setInterval(() => {
     const pairing = getOrRotatePairingCode(pairingCodeTtlMs)
-    io.emit("admin:pairing", {
+    // Only the host display(s) should ever see the code.
+    io.to(HOST_ROOM).emit("admin:pairing", {
       pairingCode: pairing.code,
       pairingCodeTtlMs: pairing.ttlMs,
     })
@@ -266,11 +278,14 @@ export function registerSocketHandlers(io: IOServer) {
       usersState.count += 1
       io.emit("users:count", { count: usersState.count })
 
+      const isHost = isHostClient(socket)
+      if (isHost) socket.join(HOST_ROOM)
+
       const session = await getOrCreateSession(socket)
       let current = session
       socket.data.sessionId = current.id
 
-      socket.emit("state:full", await buildFullState(current))
+      socket.emit("state:full", await buildFullState(current, { includePairingCode: isHost }))
       await updateRecommendationsAndAutoplay(io)
 
       socket.on("me:setName", async ({ name }) => {
@@ -280,7 +295,7 @@ export function registerSocketHandlers(io: IOServer) {
           data: { name: trimmed.length ? trimmed : null },
         })
         current = { ...current, name: trimmed.length ? trimmed : null }
-        socket.emit("state:full", await buildFullState(current))
+        socket.emit("state:full", await buildFullState(current, { includePairingCode: isHost }))
       })
 
       socket.on("admin:pair", async ({ code }) => {
@@ -299,7 +314,7 @@ export function registerSocketHandlers(io: IOServer) {
         current = { ...current, role: "admin" }
         socket.emit("admin:status", { role: "admin" })
         socket.emit("toast", { type: "success", message: "Admin enabled" })
-        socket.emit("state:full", await buildFullState(current))
+        socket.emit("state:full", await buildFullState(current, { includePairingCode: isHost }))
       })
 
       socket.on("admin:revoke", async () => {
@@ -311,7 +326,7 @@ export function registerSocketHandlers(io: IOServer) {
         current = { ...current, role: "guest" }
         socket.emit("admin:status", { role: "guest" })
         socket.emit("toast", { type: "info", message: "Admin disabled" })
-        socket.emit("state:full", await buildFullState(current))
+        socket.emit("state:full", await buildFullState(current, { includePairingCode: isHost }))
       })
 
       socket.on("queue:add", async ({ youtubeId }) => {
