@@ -19,11 +19,13 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 
 type SearchResult = {
-  youtubeId: string
+  provider: string
+  trackId: string
   title: string
   artist: string | null
   thumbnailUrl: string | null
   durationSec: number | null
+  audioUrl: string | null
 }
 
 function formatDuration(sec: number | null) {
@@ -178,7 +180,7 @@ export default function GuestPage() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-white/60">Now playing</div>
                   <div className="truncate font-medium">
-                    {nowPlaying.youtubeId ? nowPlaying.title ?? "Playing" : "Nothing yet"}
+                    {nowPlaying.trackId ? nowPlaying.title ?? "Playing" : "Nothing yet"}
                   </div>
                   <div className="truncate text-sm text-white/60">{nowPlaying.artist ?? ""}</div>
                 </div>
@@ -196,7 +198,7 @@ export default function GuestPage() {
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search YouTube for songs"
+                  placeholder="Search Jamendo for songs"
                   className="h-11 bg-white/5 border-white/10 text-white placeholder:text-white/40"
                 />
               </div>
@@ -218,7 +220,7 @@ export default function GuestPage() {
                   <div className="space-y-2">
                     {results.map((r) => (
                       <div
-                        key={r.youtubeId}
+                        key={`${r.provider}:${r.trackId}`}
                         className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-white/5 transition-colors"
                       >
                         <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-white/5 ring-1 ring-white/10">
@@ -236,7 +238,7 @@ export default function GuestPage() {
                           ) : null}
                           <Button
                             className="rounded-full bg-white text-black hover:bg-white/90"
-                            onClick={() => socket?.emit("queue:add", { youtubeId: r.youtubeId })}
+                            onClick={() => socket?.emit("queue:add", { provider: r.provider, trackId: r.trackId })}
                           >
                             Add
                           </Button>

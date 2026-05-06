@@ -21,7 +21,7 @@ import { useSocketSync } from "@/client/useSocketSync"
 import { useSecondTick } from "@/client/useSecondTick"
 import { getSocket } from "@/client/socket"
 import { useAppStore } from "@/client/store"
-import { YouTubeIFramePlayer } from "@/components/now-playing/YouTubeIFramePlayer"
+import { AudioPlayer } from "@/components/now-playing/AudioPlayer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -66,13 +66,14 @@ export default function HostPage() {
 
   const nextUp = queue[0] ?? null
   const isLobby = nowPlaying.isLobby
-  const isIdle = !nowPlaying.youtubeId || isLobby
-  const playbackYoutubeId = nowPlaying.youtubeId
+  const isIdle = !nowPlaying.trackId || isLobby
+  const playbackSrc = nowPlaying.audioUrl
+  const playbackMode: "queue" | "lobby" = isIdle ? "lobby" : "queue"
   const heroThumbnailUrl = nowPlaying.thumbnailUrl
 
   const displayTitle = isLobby
     ? "Lobby"
-    : (nowPlaying.title ?? (nowPlaying.youtubeId ? "Playing" : "Waiting for songs"))
+    : (nowPlaying.title ?? (nowPlaying.trackId ? "Playing" : "Waiting for songs"))
   const displayArtist = isLobby ? "Waiting for someone to queue a song" : (nowPlaying.artist ?? "")
 
   useEffect(() => {
@@ -200,7 +201,7 @@ export default function HostPage() {
         <div className="mt-6 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <section className="space-y-6">
             <Card className="border-white/10 bg-white/[0.03] p-6">
-              {/* Keep DOM structure stable to avoid unmounting the YouTube player (prevents blinking). */}
+              {/* Keep DOM structure stable to avoid unmounting the player (prevents blinking). */}
               <div className={isIdle && recommendations.items.length ? "mb-6" : "mb-0"}>
                 {isIdle && recommendations.items.length ? (
                   <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-4">
@@ -216,7 +217,7 @@ export default function HostPage() {
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       {recommendations.items.slice(0, 6).map((r) => (
                         <div
-                          key={r.youtubeId}
+                          key={`${r.provider}:${r.trackId}`}
                           className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-white/5 transition-colors"
                         >
                           <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-white/5 ring-1 ring-white/10">
@@ -249,7 +250,7 @@ export default function HostPage() {
                 </div>
 
                 <div className="min-w-0 flex flex-col">
-                  <div className="text-sm text-white/60">Playing from YouTube</div>
+                  <div className="text-sm text-white/60">Playing from Jamendo</div>
                   <div className="mt-2 text-4xl font-semibold tracking-tight leading-tight truncate">{displayTitle}</div>
                   <div className="mt-2 text-lg text-white/70 truncate">{displayArtist}</div>
 
@@ -288,23 +289,26 @@ export default function HostPage() {
 
                   <div className="mt-6 rounded-3xl overflow-hidden bg-black/40 ring-1 ring-white/10">
                     <div className="aspect-video">
-                      <YouTubeIFramePlayer
-                        youtubeId={playbackYoutubeId}
-                        isPaused={isLobby ? false : nowPlaying.isPaused}
-                        playbackMode={isLobby ? "lobby" : "queue"}
+                      <AudioPlayer
+                        src={playbackSrc}
+                        isPaused={playbackMode === "lobby" ? false : nowPlaying.isPaused}
+                        playbackMode={playbackMode}
                         onEnded={() => {
-                          if (isLobby) return
-                          socket?.emit("playback:ended", { youtubeId: nowPlaying.youtubeId ?? "" })
+                          if (playbackMode === "lobby") return
+                          if (!nowPlaying.provider || !nowPlaying.trackId) return
+                          socket?.emit("playback:ended", { provider: nowPlaying.provider, trackId: nowPlaying.trackId })
                         }}
                         onError={(message) => {
-                          toast.error(message ?? "YouTube playback error")
-                          if (!isLobby) socket?.emit("playback:error", { youtubeId: nowPlaying.youtubeId ?? "", message })
+                          toast.error(message ?? "Audio playback error")
+                          if (playbackMode === "lobby") return
+                          if (!nowPlaying.provider || !nowPlaying.trackId) return
+                          socket?.emit("playback:error", { provider: nowPlaying.provider, trackId: nowPlaying.trackId, message })
                         }}
                         onReady={(d) => setPlayerDuration(d)}
                       />
                     </div>
                     <div className="px-3 py-2 text-xs text-white/50 font-mono">
-                      youtubeId={JSON.stringify(playbackYoutubeId)}
+                      track={JSON.stringify(nowPlaying.provider && nowPlaying.trackId ? `${nowPlaying.provider}:${nowPlaying.trackId}` : null)}
                       {isLobby ? " · mode=lobby" : ""}
                     </div>
                   </div>

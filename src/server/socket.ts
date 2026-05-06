@@ -30,26 +30,26 @@ const recState: {
   items: [],
 }
 
-function normalizeYouTubeId(input: unknown): string | null {
+function normalizeTrackId(input: unknown): string | null {
   const s = String(input ?? "").trim()
-  return /^[a-zA-Z0-9_-]{11}$/.test(s) ? s : null
+  return s.length ? s : null
 }
 
-function resolveLobbyYoutubeId(): string | null {
-  const raw = process.env.NEXT_PUBLIC_LOBBY_YOUTUBE_ID
-  if (raw === "") return null
-  const v = normalizeYouTubeId(raw ?? "jfKfPfyJRdk")
-  return v ?? "jfKfPfyJRdk"
+function resolveLobbyTrackId(): string | null {
+  const raw = String(process.env.LOBBY_TRACK_ID ?? "").trim()
+  if (!raw) return null
+  return raw
 }
 
-const lobbyYoutubeId = resolveLobbyYoutubeId()
+const lobbyTrackId = resolveLobbyTrackId()
 
-function lobbyMeta(youtubeId: string) {
+function lobbyMeta() {
   return {
     title: "Lobby",
     artist: "Waiting for someone to queue a song",
-    thumbnailUrl: `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`,
+    thumbnailUrl: null as string | null,
     durationSec: null as number | null,
+    audioUrl: null as string | null,
   }
 }
 
@@ -61,7 +61,7 @@ function emitRecommendations(io: IOServer) {
 }
 
 async function ensureIdleLobbyNowPlaying(io: IOServer) {
-  if (!lobbyYoutubeId) return
+  if (!lobbyTrackId) return
   await ensureNowPlayingRow()
 
   const [queueCount, np] = await Promise.all([
@@ -70,12 +70,13 @@ async function ensureIdleLobbyNowPlaying(io: IOServer) {
   ])
   if (queueCount !== 0) return
 
-  const current = normalizeYouTubeId(np?.youtubeId)
-  if (current === lobbyYoutubeId) return
+  const currentProvider = String(np?.provider ?? "").trim() || null
+  const currentTrackId = normalizeTrackId(np?.trackId)
+  if (currentProvider === "jamendo" && currentTrackId === lobbyTrackId) return
 
   await prisma.nowPlaying.update({
     where: { id: 1 },
-    data: { youtubeId: lobbyYoutubeId, queueItemId: null, startedAt: new Date(), isPaused: false },
+    data: { provider: "jamendo", trackId: lobbyTrackId, queueItemId: null, startedAt: new Date(), isPaused: false },
   })
   io.emit("nowPlaying:updated", { nowPlaying: await fetchNowPlayingDTO() })
 }
@@ -87,8 +88,12 @@ async function updateRecommendationsAndAutoplay(io: IOServer) {
     prisma.nowPlaying.findUnique({ where: { id: 1 } }),
   ])
 
-  const isLobbyNowPlaying = !!(lobbyYoutubeId && nowPlaying?.youtubeId === lobbyYoutubeId)
-  const isIdle = queueCount === 0 && (!nowPlaying?.youtubeId || isLobbyNowPlaying)
+  const isLobbyNowPlaying = !!(
+    lobbyTrackId &&
+    nowPlaying?.provider === "jamendo" &&
+    normalizeTrackId(nowPlaying?.trackId) === lobbyTrackId
+  )
+  const isIdle = queueCount === 0 && (!nowPlaying?.trackId || isLobbyNowPlaying)
   if (!isIdle) {
     if (recState.items.length) {
       recState.items = []
@@ -135,22 +140,26 @@ function isHostClient(socket: IOSocket): boolean {
 
 function toQueueItemDTO(row: {
   id: string
-  youtubeId: string
+  provider: string
+  trackId: string
   title: string
   artist: string | null
   thumbnailUrl: string | null
   durationSec: number | null
+  audioUrl: string | null
   position: number
   addedAt: Date
   addedBy: { name: string | null } | null
 }): QueueItemDTO {
   return {
     id: row.id,
-    youtubeId: row.youtubeId,
+    provider: row.provider,
+    trackId: row.trackId,
     title: row.title,
     artist: row.artist,
     thumbnailUrl: row.thumbnailUrl,
     durationSec: row.durationSec,
+    audioUrl: row.audioUrl,
     addedByName: row.addedBy?.name ?? null,
     addedAt: row.addedAt.toISOString(),
     position: row.position,
@@ -158,20 +167,24 @@ function toQueueItemDTO(row: {
 }
 
 function toNowPlayingDTO(row: {
-  youtubeId: string | null
+  provider: string | null
+  trackId: string | null
   startedAt: Date | null
   isPaused: boolean
-  meta?: { title: string; artist: string | null; thumbnailUrl: string | null; durationSec: number | null } | null
+  meta?: { title: string; artist: string | null; thumbnailUrl: string | null; durationSec: number | null; audioUrl: string | null } | null
 }): NowPlayingDTO {
-  const youtubeId = normalizeYouTubeId(row.youtubeId)
-  const isLobby = !!(lobbyYoutubeId && youtubeId && youtubeId === lobbyYoutubeId)
-  const lm = isLobby && lobbyYoutubeId ? lobbyMeta(lobbyYoutubeId) : null
+  const provider = row.provider ? String(row.provider).trim() || null : null
+  const trackId = normalizeTrackId(row.trackId)
+  const isLobby = !!(lobbyTrackId && provider === "jamendo" && trackId && trackId === lobbyTrackId)
+  const lm = isLobby ? lobbyMeta() : null
   return {
-    youtubeId,
+    provider,
+    trackId,
     title: row.meta?.title ?? lm?.title ?? null,
     artist: row.meta?.artist ?? lm?.artist ?? null,
     thumbnailUrl: row.meta?.thumbnailUrl ?? lm?.thumbnailUrl ?? null,
     durationSec: row.meta?.durationSec ?? lm?.durationSec ?? null,
+    audioUrl: row.meta?.audioUrl ?? lm?.audioUrl ?? null,
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     isPaused: row.isPaused,
     isLobby,
@@ -193,8 +206,11 @@ async function buildFullState(
   ])
 
   const pairing = opts.includePairingCode ? getOrRotatePairingCode(pairingCodeTtlMs) : null
-  const meta = nowPlaying?.youtubeId
-    ? await prisma.songMetadata.findUnique({ where: { youtubeId: nowPlaying.youtubeId } })
+  const meta =
+    nowPlaying?.provider && nowPlaying?.trackId
+      ? await prisma.songMetadata.findUnique({
+          where: { provider_trackId: { provider: nowPlaying.provider, trackId: nowPlaying.trackId } },
+        })
     : null
 
   return {
@@ -202,7 +218,8 @@ async function buildFullState(
     users: { count: usersState.count },
     queue: queue.map(toQueueItemDTO),
     nowPlaying: toNowPlayingDTO({
-      youtubeId: nowPlaying?.youtubeId ?? null,
+      provider: nowPlaying?.provider ?? null,
+      trackId: nowPlaying?.trackId ?? null,
       startedAt: nowPlaying?.startedAt ?? null,
       isPaused: nowPlaying?.isPaused ?? false,
       meta: meta
@@ -211,6 +228,7 @@ async function buildFullState(
             artist: meta.artist,
             thumbnailUrl: meta.thumbnailUrl,
             durationSec: meta.durationSec,
+            audioUrl: meta.audioUrl,
           }
         : null,
     }),
@@ -234,11 +252,15 @@ async function fetchQueueDTOs() {
 async function fetchNowPlayingDTO() {
   await ensureNowPlayingRow()
   const nowPlaying = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
-  const meta = nowPlaying?.youtubeId
-    ? await prisma.songMetadata.findUnique({ where: { youtubeId: nowPlaying.youtubeId } })
+  const meta =
+    nowPlaying?.provider && nowPlaying?.trackId
+      ? await prisma.songMetadata.findUnique({
+          where: { provider_trackId: { provider: nowPlaying.provider, trackId: nowPlaying.trackId } },
+        })
     : null
   return toNowPlayingDTO({
-    youtubeId: nowPlaying?.youtubeId ?? null,
+    provider: nowPlaying?.provider ?? null,
+    trackId: nowPlaying?.trackId ?? null,
     startedAt: nowPlaying?.startedAt ?? null,
     isPaused: nowPlaying?.isPaused ?? false,
     meta: meta
@@ -247,6 +269,7 @@ async function fetchNowPlayingDTO() {
           artist: meta.artist,
           thumbnailUrl: meta.thumbnailUrl,
           durationSec: meta.durationSec,
+          audioUrl: meta.audioUrl,
         }
       : null,
   })
@@ -259,16 +282,22 @@ async function advanceQueueAndBroadcast(io: IOServer) {
   if (!next) {
     await prisma.nowPlaying.update({
       where: { id: 1 },
-      data: { youtubeId: lobbyYoutubeId ?? null, queueItemId: null, startedAt: lobbyYoutubeId ? new Date() : null, isPaused: false },
+      data: {
+        provider: lobbyTrackId ? "jamendo" : null,
+        trackId: lobbyTrackId ?? null,
+        queueItemId: null,
+        startedAt: lobbyTrackId ? new Date() : null,
+        isPaused: false,
+      },
     })
     io.emit("nowPlaying:updated", { nowPlaying: await fetchNowPlayingDTO() })
     await updateRecommendationsAndAutoplay(io)
     return
   }
 
-  const nextId = normalizeYouTubeId(next.youtubeId)
-  if (!nextId) {
-    // Defensive: if a bad id somehow got into the queue, drop it and continue.
+  const nextProvider = String(next.provider ?? "").trim()
+  const nextTrackId = normalizeTrackId(next.trackId)
+  if (!nextProvider || !nextTrackId) {
     await prisma.queueItem.delete({ where: { id: next.id } }).catch(() => null)
     await advanceQueueAndBroadcast(io)
     return
@@ -280,7 +309,8 @@ async function advanceQueueAndBroadcast(io: IOServer) {
     await tx.nowPlaying.update({
       where: { id: 1 },
       data: {
-        youtubeId: nextId,
+        provider: nextProvider,
+        trackId: nextTrackId,
         queueItemId: null,
         startedAt: new Date(),
         isPaused: false,
@@ -399,7 +429,7 @@ export function registerSocketHandlers(io: IOServer) {
         socket.emit("state:full", await buildFullState(current, { includePairingCode: isHost }))
       })
 
-      socket.on("queue:add", async ({ youtubeId }) => {
+      socket.on("queue:add", async ({ provider: providerIn, trackId }) => {
         try {
           canAddToQueueOrThrow(current.id)
         } catch (e) {
@@ -407,28 +437,29 @@ export function registerSocketHandlers(io: IOServer) {
           return
         }
 
-        const raw = String(youtubeId ?? "").trim()
-        const idMatch = raw.match(/^[a-zA-Z0-9_-]{11}$/) ? raw : raw.match(/[?&]v=([a-zA-Z0-9_-]{11})/)?.[1] ?? null
-        const id = idMatch?.trim() ?? ""
-        if (!id) {
-          socket.emit("toast", { type: "error", message: "Missing YouTube ID" })
+        const p = String(providerIn ?? "").trim()
+        const id = normalizeTrackId(trackId)
+        if (!p || !id) {
+          socket.emit("toast", { type: "error", message: "Missing track" })
           return
         }
 
         const last = await prisma.queueItem.findFirst({ orderBy: { position: "desc" }, select: { position: true } })
         const position = (last?.position ?? 0) + 1
 
-        const known = await prisma.songMetadata.findUnique({ where: { youtubeId: id } })
-        const provider = getMusicProvider()
-        const freshMeta = known ? null : await provider.getMetadata(id).catch(() => null)
+        const known = await prisma.songMetadata.findUnique({ where: { provider_trackId: { provider: p, trackId: id } } })
+        const musicProvider = getMusicProvider()
+        const freshMeta = known ? null : await musicProvider.getMetadata(id).catch(() => null)
 
         await prisma.queueItem.create({
           data: {
-            youtubeId: id,
+            provider: p,
+            trackId: id,
             title: known?.title ?? freshMeta?.title ?? "Unknown title",
             artist: known?.artist ?? freshMeta?.artist ?? null,
             thumbnailUrl: known?.thumbnailUrl ?? freshMeta?.thumbnailUrl ?? null,
             durationSec: known?.durationSec ?? freshMeta?.durationSec ?? null,
+            audioUrl: known?.audioUrl ?? freshMeta?.audioUrl ?? null,
             addedBySessionId: current.id,
             position,
           },
@@ -436,19 +467,22 @@ export function registerSocketHandlers(io: IOServer) {
 
         if (freshMeta) {
           await prisma.songMetadata.upsert({
-            where: { youtubeId: id },
+            where: { provider_trackId: { provider: p, trackId: id } },
             update: {
               title: freshMeta.title,
               artist: freshMeta.artist,
               thumbnailUrl: freshMeta.thumbnailUrl,
               durationSec: freshMeta.durationSec,
+              audioUrl: freshMeta.audioUrl,
             },
             create: {
-              youtubeId: id,
+              provider: p,
+              trackId: id,
               title: freshMeta.title,
               artist: freshMeta.artist,
               thumbnailUrl: freshMeta.thumbnailUrl,
               durationSec: freshMeta.durationSec,
+              audioUrl: freshMeta.audioUrl,
             },
           })
         }
@@ -459,8 +493,8 @@ export function registerSocketHandlers(io: IOServer) {
         // If nothing is currently playing, start playback immediately.
         await ensureNowPlayingRow()
         const np = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
-        const isLobby = !!(lobbyYoutubeId && np?.youtubeId === lobbyYoutubeId)
-        if (!np?.youtubeId || isLobby) {
+        const isLobby = !!(lobbyTrackId && np?.provider === "jamendo" && normalizeTrackId(np?.trackId) === lobbyTrackId)
+        if (!np?.trackId || isLobby) {
           await advanceQueueAndBroadcast(io)
         } else {
           await updateRecommendationsAndAutoplay(io)
@@ -530,32 +564,22 @@ export function registerSocketHandlers(io: IOServer) {
         io.emit("nowPlaying:updated", { nowPlaying: await fetchNowPlayingDTO() })
       })
 
-      socket.on("playback:ended", async ({ youtubeId }) => {
+      socket.on("playback:ended", async ({ provider, trackId }) => {
         // Host tells us current track ended; record it then advance.
-        await recordPlay(String(youtubeId ?? "")).catch(() => null)
+        await recordPlay(String(provider ?? ""), String(trackId ?? "")).catch(() => null)
         await advanceQueueAndBroadcast(io)
       })
 
-      socket.on("playback:error", async ({ youtubeId, message }) => {
-        // Only advance on real YouTube player error codes (101/150/etc).
+      socket.on("playback:error", async ({ provider, trackId, message }) => {
+        // Only advance on "real" playback errors (network/decoding/etc).
         // Client-side integration errors shouldn't clear the queue.
         // eslint-disable-next-line no-console
         console.warn("Playback error:", message)
         const msg = String(message ?? "")
-        const yt = String(youtubeId ?? "").trim()
-        const isEmbedBlocked =
-          msg.includes("YouTube error code: 150") ||
-          msg.includes("YouTube error code: 101") ||
-          msg.includes("embed blocked")
-        if (isEmbedBlocked) {
-          io.emit("toast", {
-            type: "error",
-            message: `Skipped a track that can't be embedded on the host TV.${yt ? ` (${yt})` : ""}`,
-          })
-        }
-        if (msg.startsWith("YouTube error")) {
-          await advanceQueueAndBroadcast(io)
-        }
+        const p = String(provider ?? "").trim()
+        const id = String(trackId ?? "").trim()
+        io.emit("toast", { type: "error", message: `Skipped a track that failed to play.${p && id ? ` (${p}:${id})` : ""}` })
+        if (msg) await advanceQueueAndBroadcast(io)
       })
 
       socket.on("disconnect", () => {

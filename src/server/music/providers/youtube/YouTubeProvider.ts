@@ -74,7 +74,7 @@ function normalizeFromVideoLike(v: any): TrackMetadata | null {
   const thumbnailUrl = bestThumbUrl(v?.thumbnails ?? v?.thumbnail)
   const durationSec = durationToSeconds(v?.duration ?? v?.lengthText ?? v?.length)
 
-  return { youtubeId, title, artist, thumbnailUrl, durationSec }
+  return { provider: "youtube", trackId: youtubeId, title, artist, thumbnailUrl, durationSec, audioUrl: null }
 }
 
 export class YouTubeProvider implements MusicProvider {
@@ -109,8 +109,8 @@ export class YouTubeProvider implements MusicProvider {
     return out
   }
 
-  async getMetadata(youtubeId: string): Promise<TrackMetadata | null> {
-    const id = normalizeYouTubeId(youtubeId)
+  async getMetadata(trackId: string): Promise<TrackMetadata | null> {
+    const id = normalizeYouTubeId(trackId)
     if (!id) return null
 
     const yt = await this.getClient()

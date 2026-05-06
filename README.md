@@ -1,9 +1,9 @@
 # Music Queue (LAN Party)
 
-Apple Music-inspired, local-network party music queue powered by YouTube.
+Apple Music-inspired, local-network party music queue powered by Jamendo.
 
 ## Features
-- **Guest UI**: search YouTube, add to queue, see what’s playing.
+- **Guest UI**: search Jamendo, add to queue, see what’s playing.
 - **Host TV UI** (`/host`): fullscreen now-playing, queue, pairing code, admin controls.
 - **Real-time sync** via Socket.IO (no refresh).
 - **Persistence**: SQLite + Prisma.
@@ -15,7 +15,7 @@ Apple Music-inspired, local-network party music queue powered by YouTube.
 - Tailwind + shadcn/ui
 - Socket.IO (custom Node server)
 - Prisma + SQLite
-- YouTube: server-side search/metadata via `youtubei.js`, host playback via YouTube IFrame API
+- Jamendo: server-side search/metadata via Jamendo API, host playback via HTML5 `<audio>`
 
 ## Setup
 
@@ -32,7 +32,7 @@ copy .env.example .env
 ```
 
 Optional:
-- `NEXT_PUBLIC_LOBBY_YOUTUBE_ID`: 11-character YouTube video id for idle lobby playback on `/host` (set to empty to disable).
+- `LOBBY_TRACK_ID`: Jamendo track id for idle lobby playback on `/host` (if unset, host plays a built-in fallback tone).
 
 ### 3) Create DB + seed
 
@@ -65,9 +65,9 @@ To allow phones/tablets on the same network to connect:
   - Right arrow: skip
   - C: clear queue
 
-## Notes on YouTube playback
+## Notes on autoplay
 - Browsers restrict autoplay with sound. The host page shows a **“Tap to start playback”** overlay the first time—after that, continuous playback is typically allowed.
-- This project does **not** download/stream raw audio; it plays via the official IFrame player.
+- Jamendo playback is done via HTML5 audio (no iframe).
 
 ## Docker (optional)
 

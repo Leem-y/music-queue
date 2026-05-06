@@ -1,11 +1,11 @@
 import type { MusicProvider } from "@/server/music/providers/MusicProvider"
-import { YouTubeProvider } from "@/server/music/providers/youtube/YouTubeProvider"
+import { JamendoProvider } from "@/server/music/providers/jamendo/JamendoProvider"
 
 const globalForProvider = globalThis as unknown as { musicProvider?: MusicProvider }
 
 export function getMusicProvider(): MusicProvider {
   if (!globalForProvider.musicProvider) {
-    globalForProvider.musicProvider = new YouTubeProvider()
+    globalForProvider.musicProvider = new JamendoProvider()
   }
   return globalForProvider.musicProvider
 }

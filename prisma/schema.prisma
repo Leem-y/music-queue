@@ -33,11 +33,13 @@ model UserSession {
 
 model QueueItem {
   id           String   @id @default(cuid())
-  youtubeId    String
+  provider     String
+  trackId      String
   title        String
   artist       String?
   thumbnailUrl String?
   durationSec  Int?
+  audioUrl     String?
   addedAt      DateTime @default(now())
   position     Int
 
@@ -47,14 +49,15 @@ model QueueItem {
   nowPlaying NowPlaying?
 
   @@index([position])
-  @@index([youtubeId])
+  @@index([provider, trackId])
   @@index([addedAt])
 }
 
 model NowPlaying {
   id         Int      @id
   queueItemId String?  @unique
-  youtubeId  String?
+  provider   String?
+  trackId    String?
   startedAt  DateTime?
   isPaused   Boolean  @default(false)
   updatedAt  DateTime @updatedAt
@@ -65,11 +68,13 @@ model NowPlaying {
 }
 
 model SongMetadata {
-  youtubeId    String   @id
+  provider     String
+  trackId      String
   title        String
   artist       String?
   durationSec  Int?
   thumbnailUrl String?
+  audioUrl     String?
   playCount    Int      @default(0)
   lastPlayedAt DateTime?
   createdAt    DateTime @default(now())
@@ -79,18 +84,20 @@ model SongMetadata {
 
   @@index([playCount])
   @@index([lastPlayedAt])
+  @@id([provider, trackId])
 }
 
 model PlayHistory {
   id            String   @id @default(cuid())
-  youtubeId     String
+  provider      String
+  trackId       String
   playedAt      DateTime @default(now())
   playedCountDelta Int   @default(1)
 
-  song SongMetadata @relation(fields: [youtubeId], references: [youtubeId], onDelete: Cascade)
+  song SongMetadata @relation(fields: [provider, trackId], references: [provider, trackId], onDelete: Cascade)
 
   @@index([playedAt])
-  @@index([youtubeId, playedAt])
+  @@index([provider, trackId, playedAt])
 }
 
 model AdminGrant {

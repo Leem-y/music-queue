@@ -1,15 +1,17 @@
 export type TrackMetadata = {
-  youtubeId: string
+  provider: string
+  trackId: string
   title: string
   artist: string | null
   thumbnailUrl: string | null
   durationSec: number | null
+  audioUrl: string | null
 }
 
 export type TrackSearchResult = TrackMetadata
 
 export interface MusicProvider {
   search(query: string, limit?: number): Promise<TrackSearchResult[]>
-  getMetadata(youtubeId: string): Promise<TrackMetadata | null>
+  getMetadata(trackId: string): Promise<TrackMetadata | null>
 }
 
