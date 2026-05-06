@@ -156,6 +156,9 @@ export function YouTubeIFramePlayer(props: {
       return
     }
 
+    // Clear any previous error once we have a valid ID.
+    setLastError(null)
+
     try {
       const startVideo = () => {
         if (typeof player.loadVideoById === "function") {
@@ -194,6 +197,11 @@ export function YouTubeIFramePlayer(props: {
       onErrorRef.current((e as Error).message)
     }
   }, [youtubeId, playbackMode, state.ready, unlocked])
+
+  useEffect(() => {
+    // Also clear stale errors when going idle.
+    if (!youtubeId) setLastError(null)
+  }, [youtubeId])
 
   useEffect(() => {
     const player = playerRef.current
