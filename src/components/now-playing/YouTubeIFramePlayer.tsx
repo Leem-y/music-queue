@@ -147,6 +147,21 @@ export function YouTubeIFramePlayer(props: {
           },
         },
       })
+
+      // Some environments block the iframe from initializing (extensions, DNS filters, restricted networks).
+      // Without this, the UI can look like a silent "black box" forever.
+      setTimeout(() => {
+        if (cancelled) return
+        if (!playerRef.current) return
+        setState((s) => {
+          if (s.ready) return s
+          const msg =
+            "YouTube player didn't initialize. If you see a black box, try disabling ad blockers/privacy extensions, allow third‑party cookies for YouTube, or try another browser."
+          setLastError((prev) => prev ?? msg)
+          onErrorRef.current(msg)
+          return s
+        })
+      }, 4000)
     })().catch((e) => {
       const msg = (e as Error).message
       setLastError(msg)
