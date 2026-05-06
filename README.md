@@ -1,9 +1,9 @@
 # Music Queue (LAN Party)
 
-Apple Music-inspired, local-network party music queue powered by Jamendo.
+Apple Music-inspired, local-network party music queue powered by Spotify catalog + Spotify Connect (or Jamendo).
 
 ## Features
-- **Guest UI**: search Jamendo, add to queue, see what’s playing.
+- **Guest UI**: search Spotify (or Jamendo), add to queue, see what’s playing.
 - **Host TV UI** (`/host`): fullscreen now-playing, queue, pairing code, admin controls.
 - **Real-time sync** via Socket.IO (no refresh).
 - **Persistence**: SQLite + Prisma.
@@ -15,6 +15,7 @@ Apple Music-inspired, local-network party music queue powered by Jamendo.
 - Tailwind + shadcn/ui
 - Socket.IO (custom Node server)
 - Prisma + SQLite
+- Spotify: server-side search via Client Credentials; playback control via Spotify Connect + user OAuth (refresh token stored server-side)
 - Jamendo: server-side search/metadata via Jamendo API, host playback via HTML5 `<audio>`
 
 ## Setup
@@ -33,6 +34,12 @@ copy .env.example .env
 
 Optional:
 - `LOBBY_TRACK_ID`: Jamendo track id for idle lobby playback on `/host` (if unset, host plays a built-in fallback tone).
+- `HOST_TV_IP`: restrict `/host` and Spotify routes to a single machine on your LAN.
+
+### 2.5) Spotify setup (when using Spotify)
+- Create a Spotify app in the Spotify Developer Dashboard.
+- Set its **Redirect URI** to match `SPOTIFY_REDIRECT_URI` (example: `http://<host-ip>:3000/api/spotify/callback`).
+- On the host page (`/host`), pair admin, then click **Connect Spotify** and select a Spotify Connect device.
 
 ### 3) Create DB + seed
 
@@ -68,6 +75,7 @@ To allow phones/tablets on the same network to connect:
 ## Notes on autoplay
 - Browsers restrict autoplay with sound. The host page shows a **“Tap to start playback”** overlay the first time—after that, continuous playback is typically allowed.
 - Jamendo playback is done via HTML5 audio (no iframe).
+- Spotify playback is done via **Spotify Connect** (it plays on the selected Spotify device, not in the browser).
 
 ## Docker (optional)
 

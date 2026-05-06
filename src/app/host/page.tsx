@@ -48,12 +48,75 @@ export default function HostPage() {
   const nowPlaying = useAppStore((s) => s.nowPlaying)
   const queue = useAppStore((s) => s.queue)
   const role = useAppStore((s) => s.role)
+  const sessionId = useAppStore((s) => s.sessionId)
   const pairingCode = useAppStore((s) => s.pairingCode)
   const pairingCodeTtlMs = useAppStore((s) => s.pairingCodeTtlMs)
   const recommendations = useAppStore((s) => s.recommendations)
 
   const socket = useMemo(() => getSocket(), [])
   const [pairDraft, setPairDraft] = useState("")
+
+  const [spotifyLoggedIn, setSpotifyLoggedIn] = useState<boolean>(false)
+  const [spotifyUserLabel, setSpotifyUserLabel] = useState<string | null>(null)
+  const [spotifyDevices, setSpotifyDevices] = useState<Array<{ id?: string; name?: string; type?: string; is_active?: boolean }>>([])
+  const [spotifyDeviceId, setSpotifyDeviceId] = useState<string | null>(null)
+  const [spotifyPlayback, setSpotifyPlayback] = useState<any>(null)
+
+  async function spotifyGet<T>(path: string): Promise<T | null> {
+    if (!sessionId) return null
+    const res = await fetch(path, { headers: { "x-mq-session-id": sessionId } }).catch(() => null)
+    if (!res || !res.ok) return null
+    return (await res.json()) as T
+  }
+
+  async function spotifyPost<T>(path: string, body: unknown): Promise<T | null> {
+    if (!sessionId) return null
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-mq-session-id": sessionId },
+      body: JSON.stringify(body),
+    }).catch(() => null)
+    if (!res || !res.ok) return null
+    return (await res.json()) as T
+  }
+
+  useEffect(() => {
+    if (role !== "admin") return
+    if (!sessionId) return
+
+    let cancelled = false
+
+    async function refresh() {
+      const status = await spotifyGet<{
+        loggedIn: boolean
+        user: { displayName: string | null; email: string | null; deviceId: string | null } | null
+      }>("/api/spotify/status")
+
+      if (!status || cancelled) return
+      setSpotifyLoggedIn(!!status.loggedIn)
+      const label = status.user?.displayName ?? status.user?.email ?? null
+      setSpotifyUserLabel(label)
+      setSpotifyDeviceId(status.user?.deviceId ?? null)
+
+      if (status.loggedIn) {
+        const devices = await spotifyGet<{ devices: any[] }>("/api/spotify/devices")
+        if (devices && !cancelled) setSpotifyDevices(Array.isArray(devices.devices) ? devices.devices : [])
+
+        const pb = await spotifyGet<{ playback: any }>("/api/spotify/playback")
+        if (pb && !cancelled) setSpotifyPlayback(pb.playback ?? null)
+      } else {
+        setSpotifyDevices([])
+        setSpotifyPlayback(null)
+      }
+    }
+
+    refresh().catch(() => null)
+    const t = window.setInterval(() => refresh().catch(() => null), 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(t)
+    }
+  }, [role, sessionId])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -70,6 +133,7 @@ export default function HostPage() {
   const playbackSrc = nowPlaying.audioUrl
   const playbackMode: "queue" | "lobby" = isIdle ? "lobby" : "queue"
   const heroThumbnailUrl = nowPlaying.thumbnailUrl
+  const nowProviderLabel = nowPlaying.provider === "spotify" ? "Spotify Connect" : "Jamendo"
 
   const displayTitle = isLobby
     ? "Lobby"
@@ -200,6 +264,103 @@ export default function HostPage() {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <section className="space-y-6">
+            {role === "admin" ? (
+              <Card className="border-white/10 bg-white/[0.03] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm text-white/60">Spotify Connect</div>
+                    <div className="text-lg font-semibold">
+                      {spotifyLoggedIn ? (spotifyUserLabel ? `Connected as ${spotifyUserLabel}` : "Connected") : "Not connected"}
+                    </div>
+                    <div className="text-xs text-white/50 mt-1">
+                      {spotifyLoggedIn
+                        ? spotifyDeviceId
+                          ? `Device selected: ${spotifyDeviceId}`
+                          : "Select a device to play to"
+                        : "Connect Spotify to enable Spotify playback"}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {!spotifyLoggedIn ? (
+                      <Button
+                        className="rounded-full bg-white text-black hover:bg-white/90"
+                        disabled={!sessionId}
+                        onClick={() => {
+                          if (!sessionId) return
+                          window.location.href = `/api/spotify/login?sessionId=${encodeURIComponent(sessionId)}`
+                        }}
+                      >
+                        Connect Spotify
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {spotifyLoggedIn ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                      <div className="text-sm font-medium">Devices</div>
+                      <div className="mt-2 space-y-2">
+                        {spotifyDevices.length ? (
+                          spotifyDevices.map((d) => (
+                            <button
+                              key={String(d.id ?? d.name ?? Math.random())}
+                              className={[
+                                "w-full text-left rounded-xl px-3 py-2 ring-1 transition-colors",
+                                d.id && d.id === spotifyDeviceId
+                                  ? "bg-emerald-500/10 ring-emerald-400/30"
+                                  : "bg-white/[0.02] ring-white/10 hover:bg-white/[0.04]",
+                              ].join(" ")}
+                              onClick={() => {
+                                if (!d.id) return
+                                spotifyPost("/api/spotify/device", { deviceId: d.id })
+                                  .then(() => setSpotifyDeviceId(String(d.id)))
+                                  .catch(() => null)
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="truncate font-medium">{String(d.name ?? "Device")}</div>
+                                  <div className="truncate text-xs text-white/60">{String(d.type ?? "")}</div>
+                                </div>
+                                <div className="text-xs text-white/50">{d.is_active ? "Active" : ""}</div>
+                              </div>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="text-sm text-white/60">
+                            Open Spotify on a device on the same network (TV, laptop, speaker) to make it appear here.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                      <div className="text-sm font-medium">Playback</div>
+                      <div className="mt-2 text-sm text-white/70">
+                        {spotifyPlayback?.item?.name ? (
+                          <div>
+                            <div className="font-semibold truncate">{String(spotifyPlayback.item.name)}</div>
+                            <div className="text-white/60 truncate">
+                              {Array.isArray(spotifyPlayback.item.artists)
+                                ? spotifyPlayback.item.artists.map((a: any) => a?.name).filter(Boolean).join(", ")
+                                : ""}
+                            </div>
+                            <div className="mt-1 text-xs text-white/50">
+                              {spotifyPlayback.is_playing ? "Playing" : "Paused"}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-white/60">No active Spotify playback.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </Card>
+            ) : null}
+
             <Card className="border-white/10 bg-white/[0.03] p-6">
               {/* Keep DOM structure stable to avoid unmounting the player (prevents blinking). */}
               <div className={isIdle && recommendations.items.length ? "mb-6" : "mb-0"}>
@@ -250,7 +411,7 @@ export default function HostPage() {
                 </div>
 
                 <div className="min-w-0 flex flex-col">
-                  <div className="text-sm text-white/60">Playing from Jamendo</div>
+                  <div className="text-sm text-white/60">Playing from {nowProviderLabel}</div>
                   <div className="mt-2 text-4xl font-semibold tracking-tight leading-tight truncate">{displayTitle}</div>
                   <div className="mt-2 text-lg text-white/70 truncate">{displayArtist}</div>
 
@@ -289,23 +450,35 @@ export default function HostPage() {
 
                   <div className="mt-6 rounded-3xl overflow-hidden bg-black/40 ring-1 ring-white/10">
                     <div className="aspect-video">
-                      <AudioPlayer
-                        src={playbackSrc}
-                        isPaused={playbackMode === "lobby" ? false : nowPlaying.isPaused}
-                        playbackMode={playbackMode}
-                        onEnded={() => {
-                          if (playbackMode === "lobby") return
-                          if (!nowPlaying.provider || !nowPlaying.trackId) return
-                          socket?.emit("playback:ended", { provider: nowPlaying.provider, trackId: nowPlaying.trackId })
-                        }}
-                        onError={(message) => {
-                          toast.error(message ?? "Audio playback error")
-                          if (playbackMode === "lobby") return
-                          if (!nowPlaying.provider || !nowPlaying.trackId) return
-                          socket?.emit("playback:error", { provider: nowPlaying.provider, trackId: nowPlaying.trackId, message })
-                        }}
-                        onReady={(d) => setPlayerDuration(d)}
-                      />
+                      {nowPlaying.provider === "spotify" ? (
+                        <div className="absolute inset-0 grid place-items-center text-center px-6">
+                          <div>
+                            <div className="text-sm text-white/60">Spotify Connect playback</div>
+                            <div className="mt-2 text-lg font-semibold">Playing on your selected device</div>
+                            <div className="mt-2 text-sm text-white/60">
+                              Use the device selector above, or open Spotify to choose where it plays.
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <AudioPlayer
+                          src={playbackSrc}
+                          isPaused={playbackMode === "lobby" ? false : nowPlaying.isPaused}
+                          playbackMode={playbackMode}
+                          onEnded={() => {
+                            if (playbackMode === "lobby") return
+                            if (!nowPlaying.provider || !nowPlaying.trackId) return
+                            socket?.emit("playback:ended", { provider: nowPlaying.provider, trackId: nowPlaying.trackId })
+                          }}
+                          onError={(message) => {
+                            toast.error(message ?? "Audio playback error")
+                            if (playbackMode === "lobby") return
+                            if (!nowPlaying.provider || !nowPlaying.trackId) return
+                            socket?.emit("playback:error", { provider: nowPlaying.provider, trackId: nowPlaying.trackId, message })
+                          }}
+                          onReady={(d) => setPlayerDuration(d)}
+                        />
+                      )}
                     </div>
                     <div className="px-3 py-2 text-xs text-white/50 font-mono">
                       track={JSON.stringify(nowPlaying.provider && nowPlaying.trackId ? `${nowPlaying.provider}:${nowPlaying.trackId}` : null)}

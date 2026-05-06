@@ -14,6 +14,8 @@ import { canAddToQueueOrThrow } from "@/server/rateLimit"
 import { getOrRotatePairingCode, isValidPairingCode } from "@/server/pairing"
 import { getMusicProvider } from "@/server/music/provider"
 import { getRecommendations, recordPlay } from "@/server/recommendations"
+import { getValidSpotifyAccessToken } from "@/server/spotify/store"
+import { spotifyGetPlayback, spotifyNext, spotifyPause, spotifyPlay } from "@/server/spotify/client"
 
 type IOServer = SocketIOServer<ClientToServerEvents, ServerToClientEvents>
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>
@@ -275,6 +277,42 @@ async function fetchNowPlayingDTO() {
   })
 }
 
+async function resolveSpotifyPlaybackControllerSessionId() {
+  await ensureNowPlayingRow()
+  const np = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
+  const pinned = np?.playbackSessionId ? String(np.playbackSessionId).trim() : ""
+  if (pinned) {
+    const s = await prisma.userSession.findUnique({ where: { id: pinned }, select: { id: true, spotifyDeviceId: true } })
+    const a = await prisma.spotifyAuth.findUnique({ where: { sessionId: pinned }, select: { sessionId: true } })
+    if (s?.spotifyDeviceId && a?.sessionId) return pinned
+  }
+
+  const candidates = await prisma.userSession.findMany({
+    where: { role: "admin", spotifyDeviceId: { not: null } },
+    select: { id: true, spotifyDeviceId: true, lastSeenAt: true, spotifyAuth: { select: { sessionId: true } } },
+    orderBy: { lastSeenAt: "desc" },
+    take: 5,
+  })
+  const best = candidates.find((c) => !!c.spotifyDeviceId && !!c.spotifyAuth?.sessionId)
+  return best?.id ?? null
+}
+
+async function spotifyPlayNowPlayingIfNeeded() {
+  const np = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
+  if (!np || np.provider !== "spotify" || !np.trackId) return
+
+  const controllerSessionId = await resolveSpotifyPlaybackControllerSessionId()
+  if (!controllerSessionId) return
+
+  const session = await prisma.userSession.findUnique({ where: { id: controllerSessionId } })
+  if (!session?.spotifyDeviceId) return
+
+  const token = await getValidSpotifyAccessToken(controllerSessionId)
+  if (!token) return
+
+  await spotifyPlay({ accessToken: token.accessToken, deviceId: session.spotifyDeviceId, uris: [String(np.trackId)] })
+}
+
 async function advanceQueueAndBroadcast(io: IOServer) {
   await ensureNowPlayingRow()
 
@@ -314,6 +352,7 @@ async function advanceQueueAndBroadcast(io: IOServer) {
         queueItemId: null,
         startedAt: new Date(),
         isPaused: false,
+        playbackSessionId: nextProvider === "spotify" ? (await resolveSpotifyPlaybackControllerSessionId()) : null,
       },
     })
     await tx.queueItem.delete({ where: { id: next.id } })
@@ -329,6 +368,14 @@ async function advanceQueueAndBroadcast(io: IOServer) {
   if (recState.items.length) {
     recState.items = []
     emitRecommendations(io)
+  }
+
+  if (nextProvider === "spotify") {
+    await spotifyPlayNowPlayingIfNeeded().catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn("Spotify play failed:", e)
+      io.emit("toast", { type: "error", message: "Spotify playback failed (check device + Spotify login)" })
+    })
   }
 }
 
@@ -362,6 +409,45 @@ async function getOrCreateSession(socket: IOSocket) {
 }
 
 export function registerSocketHandlers(io: IOServer) {
+  // Spotify "ended" detection: poll current playback.
+  // Spotify Connect doesn't reliably emit ended events to us, so we periodically check progress.
+  setInterval(() => {
+    ;(async () => {
+      await ensureNowPlayingRow()
+      const np = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
+      if (!np || np.provider !== "spotify" || !np.trackId) return
+      if (np.isPaused) return
+
+      const controllerSessionId = await resolveSpotifyPlaybackControllerSessionId()
+      if (!controllerSessionId) return
+      const session = await prisma.userSession.findUnique({ where: { id: controllerSessionId } })
+      if (!session?.spotifyDeviceId) return
+      const token = await getValidSpotifyAccessToken(controllerSessionId)
+      if (!token) return
+
+      const playback = await spotifyGetPlayback(token.accessToken).catch(() => null)
+      const currentUri = playback?.item?.uri ? String(playback.item.uri) : null
+      const isPlaying = playback?.is_playing ?? false
+      const progressMs = typeof playback?.progress_ms === "number" ? playback.progress_ms : null
+      const durationMs = typeof playback?.item?.duration_ms === "number" ? playback.item.duration_ms : null
+
+      // If Spotify is playing something else (or nothing), assume our track ended/skipped.
+      if (!currentUri || currentUri !== String(np.trackId)) {
+        await recordPlay("spotify", String(np.trackId)).catch(() => null)
+        await advanceQueueAndBroadcast(io)
+        return
+      }
+
+      // If it's our track but it stopped and we're near the end, advance.
+      if (!isPlaying && progressMs != null && durationMs != null && durationMs > 0) {
+        if (durationMs - progressMs < 1500) {
+          await recordPlay("spotify", String(np.trackId)).catch(() => null)
+          await advanceQueueAndBroadcast(io)
+        }
+      }
+    })().catch(() => null)
+  }, 5000).unref?.()
+
   // Broadcast pairing code + TTL so clients can display a live countdown.
   // (Also ensures clients get the new code when it rotates.)
   setInterval(() => {
@@ -550,6 +636,15 @@ export function registerSocketHandlers(io: IOServer) {
           socket.emit("toast", { type: "error", message: "Admin only" })
           return
         }
+        await ensureNowPlayingRow()
+        const np = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
+        if (np?.provider === "spotify") {
+          const token = await getValidSpotifyAccessToken(current.id)
+          const s = await prisma.userSession.findUnique({ where: { id: current.id } })
+          if (token && s?.spotifyDeviceId) {
+            await spotifyNext({ accessToken: token.accessToken, deviceId: s.spotifyDeviceId }).catch(() => null)
+          }
+        }
         await advanceQueueAndBroadcast(io)
       })
 
@@ -560,7 +655,23 @@ export function registerSocketHandlers(io: IOServer) {
         }
         await ensureNowPlayingRow()
         const row = await prisma.nowPlaying.findUnique({ where: { id: 1 } })
-        await prisma.nowPlaying.update({ where: { id: 1 }, data: { isPaused: !(row?.isPaused ?? false) } })
+        const nextPaused = !(row?.isPaused ?? false)
+        await prisma.nowPlaying.update({ where: { id: 1 }, data: { isPaused: nextPaused, playbackSessionId: current.id } })
+
+        // Keep Spotify playback state aligned with our party state.
+        if (row?.provider === "spotify") {
+          const token = await getValidSpotifyAccessToken(current.id)
+          const s = await prisma.userSession.findUnique({ where: { id: current.id } })
+          if (token && s?.spotifyDeviceId) {
+            if (nextPaused) {
+              await spotifyPause({ accessToken: token.accessToken, deviceId: s.spotifyDeviceId }).catch(() => null)
+            } else if (row.trackId) {
+              await spotifyPlay({ accessToken: token.accessToken, deviceId: s.spotifyDeviceId, uris: [String(row.trackId)] }).catch(
+                () => null,
+              )
+            }
+          }
+        }
         io.emit("nowPlaying:updated", { nowPlaying: await fetchNowPlayingDTO() })
       })
 

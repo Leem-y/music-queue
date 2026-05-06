@@ -26,9 +26,32 @@ model UserSession {
 
   queueItems QueueItem[] @relation("AddedBy")
   adminGrant AdminGrant?
+  spotifyAuth SpotifyAuth?
+  spotifyDeviceId String?
+  playbackNowPlaying NowPlaying[] @relation("PlaybackSession")
 
   @@index([ip])
   @@index([lastSeenAt])
+}
+
+model SpotifyAuth {
+  sessionId String @id
+
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+
+  spotifyUserId String?
+  email         String?
+  displayName   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([spotifyUserId])
+  @@index([email])
 }
 
 model QueueItem {
@@ -60,11 +83,14 @@ model NowPlaying {
   trackId    String?
   startedAt  DateTime?
   isPaused   Boolean  @default(false)
+  playbackSessionId String?
   updatedAt  DateTime @updatedAt
 
   queueItem QueueItem? @relation(fields: [queueItemId], references: [id], onDelete: SetNull)
+  playbackSession UserSession? @relation("PlaybackSession", fields: [playbackSessionId], references: [id], onDelete: SetNull)
 
   @@index([queueItemId])
+  @@index([playbackSessionId])
 }
 
 model SongMetadata {
