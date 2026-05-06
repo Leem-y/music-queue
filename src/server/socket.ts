@@ -44,11 +44,40 @@ function resolveLobbyYoutubeId(): string | null {
 
 const lobbyYoutubeId = resolveLobbyYoutubeId()
 
+function lobbyMeta(youtubeId: string) {
+  return {
+    title: "Lobby",
+    artist: "Waiting for someone to queue a song",
+    thumbnailUrl: `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`,
+    durationSec: null as number | null,
+  }
+}
+
 function emitRecommendations(io: IOServer) {
   io.emit("recommendations:updated", {
     items: recState.items,
     autoplayAt: null,
   })
+}
+
+async function ensureIdleLobbyNowPlaying(io: IOServer) {
+  if (!lobbyYoutubeId) return
+  await ensureNowPlayingRow()
+
+  const [queueCount, np] = await Promise.all([
+    prisma.queueItem.count(),
+    prisma.nowPlaying.findUnique({ where: { id: 1 } }),
+  ])
+  if (queueCount !== 0) return
+
+  const current = normalizeYouTubeId(np?.youtubeId)
+  if (current === lobbyYoutubeId) return
+
+  await prisma.nowPlaying.update({
+    where: { id: 1 },
+    data: { youtubeId: lobbyYoutubeId, queueItemId: null, startedAt: new Date(), isPaused: false },
+  })
+  io.emit("nowPlaying:updated", { nowPlaying: await fetchNowPlayingDTO() })
 }
 
 async function updateRecommendationsAndAutoplay(io: IOServer) {
@@ -67,6 +96,9 @@ async function updateRecommendationsAndAutoplay(io: IOServer) {
     }
     return
   }
+
+  // If we are idle, make sure the host is actually playing lobby music.
+  await ensureIdleLobbyNowPlaying(io)
 
   if (!recState.items.length) {
     recState.items = await getRecommendations(10)
@@ -130,15 +162,17 @@ function toNowPlayingDTO(row: {
   meta?: { title: string; artist: string | null; thumbnailUrl: string | null; durationSec: number | null } | null
 }): NowPlayingDTO {
   const youtubeId = normalizeYouTubeId(row.youtubeId)
+  const isLobby = !!(lobbyYoutubeId && youtubeId && youtubeId === lobbyYoutubeId)
+  const lm = isLobby && lobbyYoutubeId ? lobbyMeta(lobbyYoutubeId) : null
   return {
     youtubeId,
-    title: row.meta?.title ?? null,
-    artist: row.meta?.artist ?? null,
-    thumbnailUrl: row.meta?.thumbnailUrl ?? null,
-    durationSec: row.meta?.durationSec ?? null,
+    title: row.meta?.title ?? lm?.title ?? null,
+    artist: row.meta?.artist ?? lm?.artist ?? null,
+    thumbnailUrl: row.meta?.thumbnailUrl ?? lm?.thumbnailUrl ?? null,
+    durationSec: row.meta?.durationSec ?? lm?.durationSec ?? null,
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     isPaused: row.isPaused,
-    isLobby: !!(lobbyYoutubeId && youtubeId && youtubeId === lobbyYoutubeId),
+    isLobby,
   }
 }
 
